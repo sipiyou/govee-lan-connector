@@ -197,14 +197,20 @@ class GoveeLanClient {
      *
      * @return array [ip => array]
      */
-    public function receiveAvailable(): array {
+    public function receiveAvailable(int $waitMs = 0): array {
         if ($this->recvSock === null) return [];
         $results = [];
+        $first   = true;
         while (true) {
             $read  = [$this->recvSock];
             $write = null;
             $ex    = null;
-            $n = socket_select($read, $write, $ex, 0, 0);
+            // Erstes Paket: mit dem angegebenen Timeout warten (blockierend)
+            // Weitere Pakete: sofort zurückkehren (alle bereits vorliegenden Pakete leeren)
+            $sec   = $first ? (int)($waitMs / 1000) : 0;
+            $usec  = $first ? ($waitMs % 1000) * 1000 : 0;
+            $first = false;
+            $n = socket_select($read, $write, $ex, $sec, $usec);
             if ($n === false || $n === 0) break;
             $buf  = ''; $from = ''; $port = 0;
             @socket_recvfrom($this->recvSock, $buf, 4096, 0, $from, $port);

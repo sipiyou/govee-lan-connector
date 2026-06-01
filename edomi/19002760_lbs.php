@@ -1,5 +1,5 @@
 ###[DEF]###
-[name           = Govee LAN :: Connector v1.01 ]
+[name           = Govee LAN :: Connector v1.03 ]
 
 [e#1 trigger    = (Re)Start/Stopp ]
 [e#2 important  = Poll-Intervall in Sek.#init=0 ]
@@ -10,6 +10,7 @@
 [e#8 important  = Admin-Interface#init=1 ]
 [e#9            = DEBUG#init=0 ]
 
+[v#1            = 0] // Exec
 ###[/DEF]###
 
 ###[HELP]###
@@ -120,7 +121,13 @@ By using this code, you acknowledge that you have read, understood, and agreed t
 Changelog:
 ==========
 v1.00  03.04.2026 NG initial release
+ 1.03  01.06.2026 Optimierung: receiveAvailable() mit Timeout-Parameter — Busy-Loop beseitigt;
+                  im Response-Fenster 50ms, außerhalb bis 200ms blockierend (CPU-schonend)
  1.01  10.04.2026 NG bugfix für E1=0/2 beim Systemstart und dann E1=1
+ 1.02  11.04.2026 NG bugfix: Queue-Filter auf alle Non-Start-Signale (E1!=1) ausgeweitet;
+                             verhindert dass abgelaufene E1=2 den neuen EXEC sofort beenden
+                             EXEC: refresh-Check bei E1 entfernt (Queue-Overwrite durch dyn.
+                             Eingänge konnte refresh=0 setzen → E1=0 wurde nicht erkannt)
 */
 
 function LB_LBSID_debug($debugLevel, $thisTxtDbgLevel, $str) {
@@ -163,7 +170,7 @@ function LB_LBSID_installLib($libDir, $debugLevel) {
         mkdir($libDir, 0755, true);
     }
     $libFile = $libDir . "/GoveeLanClient.php";
-    $data = gzuncompress(base64_decode("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"));
+    $data = gzuncompress(base64_decode("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"));
     if (!file_put_contents($libFile, $data)) {
         LB_LBSID_debug($debugLevel, 0, "Lib ($libFile) konnte nicht erstellt werden!");
     } else {
@@ -179,8 +186,9 @@ function LB_LBSID($id) {
         $vars    = logic_getVars($id);
         $running = (int)($vars[1] ?? 0) === 1;
 
-        // E1=0 nur weiterleiten wenn EXEC gerade läuft — sonst verwerfen (z.B. Systemstart-Sequenz)
-        if (!($E[1]['refresh'] && (int)$E[1]['value'] === 0 && !$running)) {
+        // Stop-Signale (E1=0 / E1=2) nur weiterleiten wenn EXEC läuft — sonst verwerfen
+        // (verhindert dass abgelaufene Stop-Befehle den neuen EXEC sofort wieder beenden)
+        if (!($E[1]['refresh'] && (int)$E[1]['value'] !== 1 && !$running)) {
             logic_setInputsQueued($id, $E);
         }
 
@@ -220,6 +228,7 @@ function LB_LBSID($id) {
 
  if (!file_exists($GOVEE_LIB)) {
      exec_debug(0, "GoveeLanClient nicht vorhanden. Bitte LBS neu starten (E1=1).");
+     logic_setVar($id, 1, 0);
      sql_disconnect();
      die();
  }
@@ -341,8 +350,18 @@ function LB_LBSID($id) {
          $pollDeadline = $now + GoveeLanClient::CMD_TIMEOUT;
      }
 
-     // Antworten verarbeiten — läuft jede Iteration, kehrt sofort zurück wenn nichts anliegt
-     foreach ($govee->receiveAvailable() as $ip => $status) {
+     // Antworten verarbeiten — Timeout je nach Zustand:
+     // Innerhalb Response-Fenster: 50ms (warten auf UDP-Antworten)
+     // Außerhalb: bis zu 200ms (bis zum nächsten Poll), CPU-schonend
+     $now = microtime(true);
+     if (!empty($pendingIps) && $now < $pollDeadline) {
+         $waitMs = min(50, (int)(($pollDeadline - $now) * 1000));
+     } elseif ($pollInterval > 0) {
+         $waitMs = min(200, max(0, (int)(($lastPoll + $pollInterval - $now) * 1000)));
+     } else {
+         $waitMs = 200;
+     }
+     foreach ($govee->receiveAvailable($waitMs) as $ip => $status) {
          if (!isset($deviceByIp[$ip])) continue;
          unset($pendingIps[$ip]);
          $devID = $deviceByIp[$ip];

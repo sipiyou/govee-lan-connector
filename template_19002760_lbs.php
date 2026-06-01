@@ -1,5 +1,5 @@
 ###[DEF]###
-[name           = Govee LAN :: Connector v1.01 ]
+[name           = Govee LAN :: Connector v1.03 ]
 
 [e#1 trigger    = (Re)Start/Stopp ]
 [e#2 important  = Poll-Intervall in Sek.#init=0 ]
@@ -10,6 +10,7 @@
 [e#8 important  = Admin-Interface#init=1 ]
 [e#9            = DEBUG#init=0 ]
 
+[v#1            = 0] // Exec
 ###[/DEF]###
 
 ###[HELP]###
@@ -101,7 +102,13 @@ EDOMI_ROOT/main/include/php/Govee:
 Changelog:
 ==========
 v1.00  03.04.2026 NG initial release
+ 1.03  01.06.2026 Optimierung: receiveAvailable() mit Timeout-Parameter — Busy-Loop beseitigt;
+                  im Response-Fenster 50ms, außerhalb bis 200ms blockierend (CPU-schonend)
  1.01  10.04.2026 NG bugfix für E1=0/2 beim Systemstart und dann E1=1
+ 1.02  11.04.2026 NG bugfix: Queue-Filter auf alle Non-Start-Signale (E1!=1) ausgeweitet;
+                             verhindert dass abgelaufene E1=2 den neuen EXEC sofort beenden
+                             EXEC: refresh-Check bei E1 entfernt (Queue-Overwrite durch dyn.
+                             Eingänge konnte refresh=0 setzen → E1=0 wurde nicht erkannt)
 */
 
 function LB_LBSID_debug($debugLevel, $thisTxtDbgLevel, $str) {
@@ -160,8 +167,9 @@ function LB_LBSID($id) {
         $vars    = logic_getVars($id);
         $running = (int)($vars[1] ?? 0) === 1;
 
-        // E1=0 nur weiterleiten wenn EXEC gerade läuft — sonst verwerfen (z.B. Systemstart-Sequenz)
-        if (!($E[1]['refresh'] && (int)$E[1]['value'] === 0 && !$running)) {
+        // Stop-Signale (E1=0 / E1=2) nur weiterleiten wenn EXEC läuft — sonst verwerfen
+        // (verhindert dass abgelaufene Stop-Befehle den neuen EXEC sofort wieder beenden)
+        if (!($E[1]['refresh'] && (int)$E[1]['value'] !== 1 && !$running)) {
             logic_setInputsQueued($id, $E);
         }
 
@@ -201,6 +209,7 @@ function LB_LBSID($id) {
 
  if (!file_exists($GOVEE_LIB)) {
      exec_debug(0, "GoveeLanClient nicht vorhanden. Bitte LBS neu starten (E1=1).");
+     logic_setVar($id, 1, 0);
      sql_disconnect();
      die();
  }
@@ -322,8 +331,18 @@ function LB_LBSID($id) {
          $pollDeadline = $now + GoveeLanClient::CMD_TIMEOUT;
      }
 
-     // Antworten verarbeiten — läuft jede Iteration, kehrt sofort zurück wenn nichts anliegt
-     foreach ($govee->receiveAvailable() as $ip => $status) {
+     // Antworten verarbeiten — Timeout je nach Zustand:
+     // Innerhalb Response-Fenster: 50ms (warten auf UDP-Antworten)
+     // Außerhalb: bis zu 200ms (bis zum nächsten Poll), CPU-schonend
+     $now = microtime(true);
+     if (!empty($pendingIps) && $now < $pollDeadline) {
+         $waitMs = min(50, (int)(($pollDeadline - $now) * 1000));
+     } elseif ($pollInterval > 0) {
+         $waitMs = min(200, max(0, (int)(($lastPoll + $pollInterval - $now) * 1000)));
+     } else {
+         $waitMs = 200;
+     }
+     foreach ($govee->receiveAvailable($waitMs) as $ip => $status) {
          if (!isset($deviceByIp[$ip])) continue;
          unset($pendingIps[$ip]);
          $devID = $deviceByIp[$ip];
